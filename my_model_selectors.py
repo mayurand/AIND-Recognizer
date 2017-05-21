@@ -74,23 +74,34 @@ class SelectorBIC(ModelSelector):
 
         :return: GaussianHMM object
         """
+        print("Entered")
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # Model selection based on BIC scores
-        try:
-            scoreBIC = []
-            for num_hidden_states in range(self.min_n_components,self.max_n_components+1):
-                scoreBIC.append(GaussianHMM(n_components=num_hidden_states, covariance_type="diag", n_iter=1000,
-                                    random_state=self.random_state, verbose=False).fit(self.X, self.lengths))
-
-            if self.verbose:
-                print("model created for {} with {} states".format(self.this_word, num_hidden_states))
+        modelBIC = []
+        ## Based on different number of hidden states and their corresponding BIC values, the one with max BIC value is taken
+        for num_hidden_states in range(self.min_n_components,self.max_n_components+1):
+            print("num_hidden_states",num_hidden_states)
+            try:
+                model = self.base_model(num_hidden_states) ## Make a model
+                logL = model.score(self.X, self.lengths)
+                logN = np.log(len(self.X))
+                params = num_hidden_states * num_hidden_states + 2 * num_hidden_states * len(self.X[0]) - 1
+                scoreBIC = -2 * logL + params * logN
+                
+                print("word: {}, num_states: {}, BIC: {}".format(self.this_word, num_hidden_states, scoreBIC))
+                modelBIC.append((scoreBIC,model))
             
-            from operator import attrgetter
-            return max(scoreBIC, key=attrgetter(scoreBIC.score(self.X, self.lengths)))
-        except:
-            if self.verbose:
-                print("failure on {} with {} states".format(self.this_word, num_hidden_states))
+            except:
+                print("FAILED")
+                if self.verbose:
+                    print("failure on {} with {} states".format(self.this_word, num_hidden_states))
+                return None
+            
+        if modelBIC != None:
+            scoreBIC, model = min(modelBIC)
+            return model
+        else:
             return None
 
 
@@ -114,10 +125,13 @@ class SelectorCV(ModelSelector):
     ''' select best model based on average log Likelihood of cross-validation folds
 
     '''
+ 
 
-    def select(self):
-        warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-        split_method = KFold()
-        for cv_train_idx, cv_test_idx in split_method.split(word_sequences):
-            
+#===============================================================================
+#     def select(self):
+#         warnings.filterwarnings("ignore", category=DeprecationWarning)
+# 
+#         split_method = KFold()
+#         for cv_train_idx, cv_test_idx in split_method.split(word_sequences):
+#             
+#===============================================================================
