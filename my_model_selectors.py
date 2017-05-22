@@ -74,31 +74,27 @@ class SelectorBIC(ModelSelector):
 
         :return: GaussianHMM object
         """
-        print("Entered")
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # Model selection based on BIC scores
         modelBIC = []
-        ## Based on different number of hidden states and their corresponding BIC values, the one with max BIC value is taken
+        ## Based on different number of hidden states and their corresponding BIC values, the one with min BIC value is taken
         for num_hidden_states in range(self.min_n_components,self.max_n_components+1):
-            print("num_hidden_states",num_hidden_states)
             try:
                 model = self.base_model(num_hidden_states) ## Make a model
                 logL = model.score(self.X, self.lengths)
                 logN = np.log(len(self.X))
                 params = num_hidden_states * num_hidden_states + 2 * num_hidden_states * len(self.X[0]) - 1
                 scoreBIC = -2 * logL + params * logN
-                
-                print("word: {}, num_states: {}, BIC: {}".format(self.this_word, num_hidden_states, scoreBIC))
+                # print("word: {}, num_states: {}, BIC: {}".format(self.this_word, num_hidden_states, scoreBIC))
                 modelBIC.append((scoreBIC,model))
             
             except:
-                print("FAILED")
                 if self.verbose:
                     print("failure on {} with {} states".format(self.this_word, num_hidden_states))
-                return None
+                pass
             
-        if modelBIC != None:
+        if modelBIC != []:
             scoreBIC, model = min(modelBIC)
             return model
         else:
@@ -117,21 +113,92 @@ class SelectorDIC(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        # Model selection based on DIC scores
+        modelDIC = []
+        ## Based on different number of hidden states and their corresponding DIC values, the one with max DIC value is taken
+        for num_hidden_states in range(self.min_n_components,self.max_n_components+1):
+            try:
+                model = self.base_model(num_hidden_states) ## Make a model
+                logLword = model.score(self.X, self.lengths)
+                logLothers = []
+                for word in self.words:
+                    if word == self.this_word:
+                        continue
+                    other_word_X, other_word_lengths = self.hwords[word]
+                    logL_other_score = model.score(other_word_X, other_word_lengths)
+                    logLothers.append(logL_other_score)
+                    
+                avg_logL_others = np.average(logLothers)
+                scoreDIC = logLword - avg_logL_others
+                # print("word: {}, num_states: {}, BIC: {}".format(self.this_word, num_hidden_states, scoreBIC))
+                modelDIC.append((scoreDIC,model))
+            
+            except:
+                if self.verbose:
+                    print("failure on {} with {} states".format(self.this_word, num_hidden_states))
+                pass
+            
+        if modelDIC != []:
+            scoreDIC, model = max(modelDIC)
+            return model
+        else:
+            return None
 
 
 class SelectorCV(ModelSelector):
     ''' select best model based on average log Likelihood of cross-validation folds
 
     '''
- 
+    def select(self):
+        results = []
+        num_splits = len(self.lengths)
+        ''' As KFold() require splits for 2 or more, so there is a special case
+            for num_splits == 1 where the algorithm wont be processed
+        '''
+        if num_splits == 1:
+            for num_states in range(self.min_n_components, self.max_n_components + 1):
+                try:
+                    # print("Train fold indices:{}".format(train_idx))  # view indices of the folds
+                    model = self.base_model(num_states)
+                    logL = model.score(self.X, self.lengths)
+                    # print("Word:{}, num_states:{} => logL:{}".format(word, num_states, logL))
+                    results.append((logL, model))
+                except:
+                    # print("Error training model for word: {} with num_states: {}".format(word, num_states))
+                    pass
+        else:
+            split_method = KFold(n_splits=min(3, len(self.lengths)))
+            word = self.this_word
+            for num_states in range(self.min_n_components, self.max_n_components + 1):
+                try:
+                    scores = []
+                    model = self.base_model(num_states)
+                    for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+                        # print("Train fold indices:{} Test fold indices:{}".format(cv_train_idx, cv_test_idx))  # view indices of the folds
+                        try:
+                            train_X, train_lengths = combine_sequences(cv_train_idx, self.sequences)
+                            hmm_model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000,
+                                                    random_state=self.random_state, verbose=False).fit(train_X,
+                                                                                                       train_lengths)
+                            test_X, test_lengths = combine_sequences(cv_test_idx, self.sequences)
+                            logL = model.score(test_X, test_lengths)
+                            scores.append(logL)
+                        except:
+                            if self.verbose:
+                                print("failure on {} with {} states".format(self.this_word, num_states))
+                            pass
+                    if scores:
+                        avgLogLikelihood = np.average(scores)
+                        # print("Word:{}, num_states:{} => scores:{}, avg:{}".format(word, num_states, scores, avgLogLikelihood))
+                        results.append((avgLogLikelihood, model))
+                except ValueError as valueError:
+                    if self.verbose:
+                        print("Error evaluating model for num_states: {} and word: {} - error: {}".format(num_states, word, valueError))
+                    pass
+        
+        if results != []:
+            score, model = max(results, key=lambda x:x[0])
+            return model
+        else:
+            return None
 
-#===============================================================================
-#     def select(self):
-#         warnings.filterwarnings("ignore", category=DeprecationWarning)
-# 
-#         split_method = KFold()
-#         for cv_train_idx, cv_test_idx in split_method.split(word_sequences):
-#             
-#===============================================================================
